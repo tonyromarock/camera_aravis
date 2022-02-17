@@ -63,6 +63,7 @@ extern "C" {
 #include <tf2_ros/transform_broadcaster.h>
 #include <camera_aravis/CameraAravisConfig.h>
 #include <camera_aravis/CameraAutoInfo.h>
+#include <camera_aravis/ExtendedCameraInfo.h>
 
 #include <camera_aravis/get_integer_feature_value.h>
 #include <camera_aravis/set_integer_feature_value.h>
@@ -222,6 +223,8 @@ protected:
   void setAutoMaster(bool value);
   void setAutoSlave(bool value);
 
+  void setExtendedCameraInfo(std::string channel_name, size_t stream_id);
+
   // Extra stream options for GigEVision streams.
   void tuneGvStream(ArvGvStream *p_stream);
 
@@ -300,6 +303,9 @@ protected:
   ros::Publisher auto_pub_;
   ros::Subscriber auto_sub_;
 
+  boost::recursive_mutex extended_camera_info_mutex_;
+  std::vector<ros::Publisher> extended_camera_info_pubs_;
+
   Config config_;
   Config config_min_;
   Config config_max_;  
@@ -347,6 +353,8 @@ protected:
   gint num_streams_;
   std::vector<ArvStream *> p_streams_;
   std::vector<std::string> stream_names_;
+  bool extended_camera_info_;
+  std::string vendor_name_;
   std::vector<CameraBufferPool::Ptr> p_buffer_pools_;
   int32_t acquire_ = 0;
   std::vector<ConversionFunction> convert_formats;

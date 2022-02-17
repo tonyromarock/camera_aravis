@@ -535,6 +535,7 @@ void CameraAravisNodelet::onInit()
   }
 
   p_device_ = arv_camera_get_device(p_camera_);
+  vendor_name_ = arv_camera_get_vendor_name(p_camera_);
   ROS_INFO("Opened: %s-%s", arv_camera_get_vendor_name(p_camera_),
            arv_device_get_string_feature_value(p_device_, "DeviceSerialNumber"));
 
@@ -586,6 +587,7 @@ void CameraAravisNodelet::onInit()
     p_camera_info_managers_.push_back(NULL);
     camera_infos_.push_back(sensor_msgs::CameraInfoPtr());
     cam_pubs_.push_back(image_transport::CameraPublisher());
+    extended_camera_info_pubs_.push_back(ros::Publisher());
   }
 
   // Get parameter bounds.
@@ -687,6 +689,8 @@ void CameraAravisNodelet::onInit()
   pnh.param<std::string>("frame_id", config_.frame_id, config_.frame_id);
   pnh.param<bool>("auto_master", config_.AutoMaster, config_.AutoMaster);
   pnh.param<bool>("auto_slave", config_.AutoSlave, config_.AutoSlave);
+  pnh.param<bool>("ExtendedCameraInfo", extended_camera_info_, false);
+
   setAutoMaster(config_.AutoMaster);
   setAutoSlave(config_.AutoSlave);
 
@@ -747,6 +751,8 @@ void CameraAravisNodelet::onInit()
   for(int i = 0; i < num_streams_; i++) {
     // Start the camerainfo manager.
     p_camera_info_managers_[i].reset(new camera_info_manager::CameraInfoManager(pnh, stream_names_[i], calib_urls[i]));
+    // publish an extended camera info message
+    setExtendedCameraInfo(stream_names_[i], i);
     ROS_INFO("Reset %s Camera Info Manager", stream_names_[i].c_str());
     ROS_INFO("%s Calib URL: %s", stream_names_[i].c_str(), calib_urls[i].c_str());
   }
@@ -1237,6 +1243,22 @@ void CameraAravisNodelet::setAutoSlave(bool value)
   }
 }
 
+void CameraAravisNodelet::setExtendedCameraInfo(std::string channel_name, size_t stream_id)
+{
+    if (extended_camera_info_)
+    {
+        if (channel_name.empty()) {
+          extended_camera_info_pubs_[stream_id]  = getNodeHandle().advertise<ExtendedCameraInfo>(ros::names::remap("extended_camera_info"), 1, true);
+        } else {
+          extended_camera_info_pubs_[stream_id]  = getNodeHandle().advertise<ExtendedCameraInfo>(ros::names::remap(channel_name + "/extended_camera_info"), 1, true);
+        }
+    }
+    else
+    {
+        extended_camera_info_pubs_[stream_id].shutdown();
+    }
+}
+
 // Extra stream options for GigEVision streams.
 void CameraAravisNodelet::tuneGvStream(ArvGvStream *p_stream)
 {
@@ -1595,6 +1617,73 @@ void CameraAravisNodelet::newBufferReady(ArvStream *p_stream, CameraAravisNodele
       // check PTP status, camera cannot recover from "Faulty" by itself
       if (p_can->use_ptp_stamp_)
         p_can->resetPtpClock();
+
+      // publish an extended_camera_info message
+      if (p_can->extended_camera_info_) {
+        ExtendedCameraInfo msg;
+
+        msg.camera_info = *(p_can->camera_infos_[stream_id]);
+
+        p_can->extended_camera_info_mutex_.lock();
+
+        arv_camera_gv_select_stream_channel(p_can->p_camera_, stream_id);
+        if (p_can->vendor_name_ == "Basler") {
+          msg.exposure_time = arv_device_get_float_feature_value(p_can->p_device_, "ExposureTimeAbs");
+        } else {
+          msg.exposure_time = arv_device_get_float_feature_value(p_can->p_device_, "ExposureTime");
+        }
+
+        arv_device_set_string_feature_value(p_can->p_device_, "GainSelector", "All");
+        if (p_can->vendor_name_ == "Basler") {
+          msg.gain = (float) arv_device_get_integer_feature_value(p_can->p_device_, "GainRaw");
+        } else {
+          msg.gain = arv_device_get_float_feature_value(p_can->p_device_, "Gain");
+        }
+
+        if (p_can->vendor_name_ == "Basler") {
+          arv_device_set_string_feature_value(p_can->p_device_, "BlackLevelSelector", "All");
+          msg.black_level = (float) arv_device_get_integer_feature_value(p_can->p_device_, "BlackLevelRaw");
+        } else if (p_can->vendor_name_ == "JAI Corporation") {
+          // Reading the black level register for both streams of the JAI FS 3500D takes too long.
+          // The frame rate the drops below 10 fps.
+          msg.black_level = 0;
+        } else {
+          arv_device_set_string_feature_value(p_can->p_device_, "BlackLevelSelector", "All");
+          msg.black_level = arv_device_get_float_feature_value(p_can->p_device_, "BlackLevel");
+        }
+
+        if (p_can->vendor_name_ == "Basler") {
+          arv_device_set_string_feature_value(p_can->p_device_, "BalanceRatioSelector", "Red");
+          msg.white_balance_red = arv_device_get_float_feature_value(p_can->p_device_, "BalanceRatioAbs");
+          arv_device_set_string_feature_value(p_can->p_device_, "BalanceRatioSelector", "Green");
+          msg.white_balance_green = arv_device_get_float_feature_value(p_can->p_device_, "BalanceRatioAbs");
+          arv_device_set_string_feature_value(p_can->p_device_, "BalanceRatioSelector", "Blue");
+          msg.white_balance_blue = arv_device_get_float_feature_value(p_can->p_device_, "BalanceRatioAbs");
+        } else if (p_can->vendor_name_ == "JAI Corporation") {
+          // JAI cameras do not support reading out the white balance ratios.
+          msg.white_balance_red = 0.0;
+          msg.white_balance_green = 0.0;
+          msg.white_balance_blue = 0.0;
+        } else {
+          arv_device_set_string_feature_value(p_can->p_device_, "BalanceRatioSelector", "Red");
+          msg.white_balance_red = arv_device_get_float_feature_value(p_can->p_device_, "BalanceRatio");
+          arv_device_set_string_feature_value(p_can->p_device_, "BalanceRatioSelector", "Green");
+          msg.white_balance_green = arv_device_get_float_feature_value(p_can->p_device_, "BalanceRatio");
+          arv_device_set_string_feature_value(p_can->p_device_, "BalanceRatioSelector", "Blue");
+          msg.white_balance_green = arv_device_get_float_feature_value(p_can->p_device_, "BalanceRatio");
+        }
+
+        if (p_can->vendor_name_ == "Basler") {
+	        msg.device_temperature = arv_device_get_float_feature_value(p_can->p_device_, "TemperatureAbs");
+	      } else {
+	        msg.device_temperature = arv_device_get_float_feature_value(p_can->p_device_, "DeviceTemperature");
+	      }
+
+        p_can->extended_camera_info_mutex_.unlock();
+
+        p_can->extended_camera_info_pubs_[stream_id].publish(msg);
+      }
+      
     }
     else
     {
