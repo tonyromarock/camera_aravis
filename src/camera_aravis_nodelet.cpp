@@ -573,14 +573,36 @@ void CameraAravisNodelet::onInit()
   pnh.param("camera_info_url", calib_url_args, calib_url_args);
   parseStringArgs(calib_url_args, calib_urls);
 
+  std::string binning_horizontal_mode_args;
+  std::vector<std::string> binning_horizontal_modes;
+  pnh.param("BinningHorizontalMode", binning_horizontal_mode_args, binning_horizontal_mode_args);
+  parseStringArgs(binning_horizontal_mode_args, binning_horizontal_modes);
+
+  std::string binning_horizontal_size_args;
+  std::vector<std::string> binning_horizontal_sizes;
+  pnh.param("BinningHorizontal", binning_horizontal_size_args, binning_horizontal_size_args);
+  parseStringArgs(binning_horizontal_size_args, binning_horizontal_sizes);
+
+  std::string binning_vertical_mode_args;
+  std::vector<std::string> binning_vertical_modes;
+  pnh.param("BinningVerticalMode", binning_vertical_mode_args, binning_vertical_mode_args);
+  parseStringArgs(binning_vertical_mode_args, binning_vertical_modes);
+
+  std::string binning_vertical_size_args;
+  std::vector<std::string> binning_vertical_sizes;
+  pnh.param("BinningVertical", binning_vertical_size_args, binning_vertical_size_args);
+  parseStringArgs(binning_vertical_size_args, binning_vertical_sizes);
+
+
   // check if every stream channel has been given a channel name
   if (stream_names_.size() < num_streams_) {
     num_streams_ = stream_names_.size();
   }
 
-  // initialize the sensor structs
+  // initialize the structs and objects for multiple stream channels
   for(int i = 0; i < num_streams_; i++) {
     sensors_.push_back(new Sensor());
+    rois_.push_back(new ROI());
     p_streams_.push_back(NULL);
     p_buffer_pools_.push_back(CameraBufferPool::Ptr());
     p_camera_info_managers_.push_back(NULL);
@@ -590,15 +612,121 @@ void CameraAravisNodelet::onInit()
     extended_camera_info_pubs_.push_back(ros::Publisher());
   }
 
+  // set binning modes for multiple camera stream
+  for(int i = num_streams_-1; i > -1; i--) {
+    arv_camera_gv_select_stream_channel(p_camera_,i);
+    arv_device_set_string_feature_value(p_device_, "SourceSelector", ("Source" + std::to_string(i)).c_str());
+
+    if (binning_horizontal_modes.size() == 1) {
+      arv_device_set_string_feature_value(p_device_, "BinningHorizontalMode", binning_horizontal_modes[0].c_str());
+    } else {
+      arv_device_set_string_feature_value(p_device_, "BinningHorizontalMode", binning_horizontal_modes[i].c_str());
+    }
+
+    if (binning_horizontal_sizes.size() == 1) {
+      arv_device_set_integer_feature_value(p_device_, "BinningHorizontal", atoi(binning_horizontal_sizes[0].c_str()));
+    } else {
+      arv_device_set_integer_feature_value(p_device_, "BinningHorizontal", atoi(binning_horizontal_sizes[i].c_str()));
+    }
+
+    if (binning_vertical_modes.size() == 1) {
+      arv_device_set_string_feature_value(p_device_, "BinningVerticalMode", binning_vertical_modes[0].c_str());
+    } else {
+      arv_device_set_string_feature_value(p_device_, "BinningVerticalMode", binning_vertical_modes[i].c_str());
+    }
+
+    if (binning_horizontal_sizes.size() == 1) {
+      arv_device_set_integer_feature_value(p_device_, "BinningVertical", atoi(binning_vertical_sizes[0].c_str()));
+    } else {
+      arv_device_set_integer_feature_value(p_device_, "BinningVertical", atoi(binning_vertical_sizes[i].c_str()));
+    }
+
+    int32_t warn_img_width;
+    int32_t warn_img_height;
+    arv_camera_get_sensor_size(p_camera_, &warn_img_width, &warn_img_height);
+
+    int32_t warn_width_min;
+    int32_t warn_width_max;
+
+    arv_camera_get_width_bounds(p_camera_, &warn_width_min, &warn_width_max);
+
+    int32_t warn_height_min;
+    int32_t warn_height_max;
+
+    arv_camera_get_height_bounds(p_camera_, &warn_height_min, &warn_height_max);
+
+    ROS_WARN("Stream %i (sensor size %i,%i) min (%i,%i) max (%i,%i) | Hoz: %s with %li | Vert: %s with %li ", i, 
+      warn_img_height,
+      warn_img_width,
+
+      warn_width_min,
+      warn_height_min,
+
+      warn_width_max,
+      warn_height_max,
+
+      arv_device_get_string_feature_value(p_device_, "BinningHorizontalMode"),
+      arv_device_get_integer_feature_value(p_device_, "BinningHorizontal"),
+      arv_device_get_string_feature_value(p_device_, "BinningVerticalMode"),
+      arv_device_get_integer_feature_value(p_device_, "BinningVertical")
+    );
+
+    // arv_camera_get_sensor_size(p_camera_, &sensors_[i]->width, &sensors_[i]->height);
+    arv_camera_get_width_bounds(p_camera_, &rois_[i]->width_min, &rois_[i]->width_max);
+    arv_camera_get_height_bounds(p_camera_, &rois_[i]->height_min, &rois_[i]->height_max);
+    // init default height/width to max 
+    sensors_[i]->width = rois_[i]->width_max;
+    sensors_[i]->height = rois_[i]->height_max;
+    rois_[i]->width = rois_[i]->width_max;
+    rois_[i]->height = rois_[i]->height_max;
+
+  }
+
+  ROS_WARN("Sanity Check!");
+  for(int i = 0; i < num_streams_; i++) {
+    arv_camera_gv_select_stream_channel(p_camera_,i);
+    arv_device_set_string_feature_value(p_device_, "SourceSelector", ("Source" + std::to_string(i)).c_str());
+
+    int32_t warn_img_width;
+    int32_t warn_img_height;
+    arv_camera_get_sensor_size(p_camera_, &warn_img_width, &warn_img_height);
+
+    int32_t warn_width_min;
+    int32_t warn_width_max;
+
+    arv_camera_get_width_bounds(p_camera_, &warn_width_min, &warn_width_max);
+
+    int32_t warn_height_min;
+    int32_t warn_height_max;
+
+    arv_camera_get_height_bounds(p_camera_, &warn_height_min, &warn_height_max);
+
+    ROS_WARN("Currently on stream channel: %i", arv_camera_gv_get_current_stream_channel(p_camera_));
+
+    ROS_WARN("Stream %i (sensor size %i,%i) min (%i,%i) max (%i,%i) | Hoz: %s with %li | Vert: %s with %li ", i, 
+      warn_img_height,
+      warn_img_width,
+
+      warn_width_min,
+      warn_height_min,
+
+      warn_width_max,
+      warn_height_max,
+
+      arv_device_get_string_feature_value(p_device_, "BinningHorizontalMode"),
+      arv_device_get_integer_feature_value(p_device_, "BinningHorizontal"),
+      arv_device_get_string_feature_value(p_device_, "BinningVerticalMode"),
+      arv_device_get_integer_feature_value(p_device_, "BinningVertical")
+    );
+  }
+
   // Get parameter bounds.
   arv_camera_get_exposure_time_bounds(p_camera_, &config_min_.ExposureTime, &config_max_.ExposureTime);
   arv_camera_get_gain_bounds(p_camera_, &config_min_.Gain, &config_max_.Gain);
   for(int i = 0; i < num_streams_; i++) {
     arv_camera_gv_select_stream_channel(p_camera_,i);
-    arv_camera_get_sensor_size(p_camera_, &sensors_[i]->width, &sensors_[i]->height);
   }
-  arv_camera_get_width_bounds(p_camera_, &roi_.width_min, &roi_.width_max);
-  arv_camera_get_height_bounds(p_camera_, &roi_.height_min, &roi_.height_max);
+  
   arv_camera_get_frame_rate_bounds(p_camera_, &config_min_.AcquisitionFrameRate, &config_max_.AcquisitionFrameRate);
   if (implemented_features_["FocusPos"])
   {
@@ -615,6 +743,7 @@ void CameraAravisNodelet::onInit()
 
   for(int i = 0; i < num_streams_; i++) {
     arv_camera_gv_select_stream_channel(p_camera_,i);
+    arv_device_set_string_feature_value(p_device_, "SourceSelector", ("Source" + std::to_string(i)).c_str());
 
     // Initial camera settings.
     if (implemented_features_["ExposureTime"])
@@ -629,7 +758,7 @@ void CameraAravisNodelet::onInit()
       arv_camera_set_frame_rate(p_camera_, config_.AcquisitionFrameRate);
 
     // init default to full sensor resolution
-    arv_camera_set_region (p_camera_, 0, 0, roi_.width_max, roi_.height_max);
+    // arv_camera_set_region (p_camera_, 0, 0, rois_[i]->width_max, rois_[i]->height_max);
 
     // Set up the triggering.
     if (implemented_features_["TriggerMode"] && implemented_features_["TriggerSelector"])
@@ -640,10 +769,28 @@ void CameraAravisNodelet::onInit()
 
     // possibly set or override from given parameter
     writeCameraFeaturesFromRosparam();
+
+    // Set up the height/width
+    if (i == 0) {
+      ROS_WARN("Stream %i : set (w,h) to (%i,%i)", i, rois_[i]->width, rois_[i]->height);
+      arv_device_set_integer_feature_value(p_device_, "Width", rois_[i]->width);
+      arv_device_set_integer_feature_value(p_device_, "Height", rois_[i]->height);
+    }
+  }
+
+  // Print width/height for debug purposes. I'm not sure if the feature is dependent for each stream
+  // or a global property.
+  for(int i = 0; i < num_streams_; i++) {
+    arv_camera_gv_select_stream_channel(p_camera_,i);
+    arv_device_set_string_feature_value(p_device_, "SourceSelector", ("Source" + std::to_string(i)).c_str());
+    ROS_WARN("Stream %i (w,h) read is (%li,%li)", 
+      i, 
+      arv_device_get_integer_feature_value(p_device_, "Width"), 
+      arv_device_get_integer_feature_value(p_device_, "Height"));
   }
 
   // get current state of camera for config_
-  arv_camera_get_region(p_camera_, &roi_.x, &roi_.y, &roi_.width, &roi_.height);
+  //arv_camera_get_region(p_camera_, &rois_[0]->x, &rois_[0]->y, &rois_[0]->width, &rois_[0]->height);
   config_.AcquisitionMode =
       implemented_features_["AcquisitionMode"] ? arv_device_get_string_feature_value(p_device_, "AcquisitionMode") :
           "Continuous";
@@ -791,7 +938,7 @@ void CameraAravisNodelet::onInit()
           (arv_camera_is_gv_device(p_camera_) ? "GigEVision" : "Other"));
   ROS_INFO("    Sensor width         = %d", sensors_[0]->width);
   ROS_INFO("    Sensor height        = %d", sensors_[0]->height);
-  ROS_INFO("    ROI x,y,w,h          = %d, %d, %d, %d", roi_.x, roi_.y, roi_.width, roi_.height);
+  ROS_INFO("    ROI x,y,w,h          = %d, %d, %d, %d", rois_[0]->x, rois_[0]->y, rois_[0]->width, rois_[0]->height);
   ROS_INFO("    Pixel format         = %s", sensors_[0]->pixel_format.c_str());
   ROS_INFO("    BitsPerPixel         = %lu", sensors_[0]->n_bits_pixel);
   ROS_INFO(
@@ -856,13 +1003,19 @@ void CameraAravisNodelet::spawnStream()
   for(int i = 0; i < num_streams_; i++) {
     while (spawning_) {
       arv_camera_gv_select_stream_channel(p_camera_, i);
+      arv_device_set_string_feature_value(p_device_, "SourceSelector", ("Source" + std::to_string(i)).c_str());
       p_streams_[i] = arv_camera_create_stream(p_camera_, NULL, NULL);
 
       if (p_streams_[i])
       {
         // Load up some buffers.
         arv_camera_gv_select_stream_channel(p_camera_, i);
-        const gint n_bytes_payload_stream_ = arv_camera_get_payload(p_camera_);
+        gint n_bytes_payload_stream_ = arv_camera_get_payload(p_camera_);
+        // if (i == 0) {
+        //   n_bytes_payload_stream_ *= 4;
+        // }
+        ROS_WARN("Stream %i (w,h) read is (%li,%li)", i, arv_device_get_integer_feature_value(p_device_, "Width"), arv_device_get_integer_feature_value(p_device_, "Height"));
+        ROS_WARN("Stream %i payload in bytes: %i ", i, n_bytes_payload_stream_);
 
         p_buffer_pools_[i].reset(new CameraBufferPool(p_streams_[i], n_bytes_payload_stream_, 10));
 
@@ -1606,8 +1759,8 @@ void CameraAravisNodelet::newBufferReady(ArvStream *p_stream, CameraAravisNodele
       msg_ptr->header.seq = arv_buffer_get_frame_id(p_buffer);
       // fill other stream properties
       msg_ptr->header.frame_id = frame_id;
-      msg_ptr->width = p_can->roi_.width;
-      msg_ptr->height = p_can->roi_.height;
+      msg_ptr->width = p_can->rois_[stream_id]->width;
+      msg_ptr->height = p_can->rois_[stream_id]->height;
       msg_ptr->encoding = p_can->sensors_[stream_id]->pixel_format;
       msg_ptr->step = (msg_ptr->width * p_can->sensors_[stream_id]->n_bits_pixel)/8;
 
@@ -1625,15 +1778,15 @@ void CameraAravisNodelet::newBufferReady(ArvStream *p_stream, CameraAravisNodele
       (*p_can->camera_infos_[stream_id]) = p_can->p_camera_info_managers_[stream_id]->getCameraInfo();
       p_can->camera_infos_[stream_id]->header = msg_ptr->header;
       if (p_can->camera_infos_[stream_id]->width == 0 || p_can->camera_infos_[stream_id]->height == 0) {
-        ROS_WARN_STREAM_ONCE(
+        ROS_WARN(
             "The fields image_width and image_height seem not to be set in "
             "the YAML specified by 'camera_info_url' parameter. Please set "
             "them there, because actual image size and specified image size "
             "can be different due to the region of interest (ROI) feature. In "
             "the YAML the image size should be the one on which the camera was "
             "calibrated. See CameraInfo.msg specification!");
-        p_can->camera_infos_[stream_id]->width = p_can->roi_.width;
-        p_can->camera_infos_[stream_id]->height = p_can->roi_.height;
+        p_can->camera_infos_[stream_id]->width = p_can->rois_[stream_id]->width;
+        p_can->camera_infos_[stream_id]->height = p_can->rois_[stream_id]->height;
       }
       
 

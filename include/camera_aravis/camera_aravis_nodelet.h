@@ -322,7 +322,7 @@ protected:
 
   std::unordered_map<std::string, const bool> implemented_features_;
 
-  struct
+  struct ROI
   {
     int32_t x = 0;
     int32_t y = 0;
@@ -332,7 +332,9 @@ protected:
     int32_t height = 0;
     int32_t height_min = 0;
     int32_t height_max = 0;
-  } roi_;
+  };
+
+  std::vector<ROI*> rois_;
 
   struct Sensor
   {
