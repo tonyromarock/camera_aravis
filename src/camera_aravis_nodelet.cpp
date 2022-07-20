@@ -580,8 +580,16 @@ void CameraAravisNodelet::onInit()
 
   std::string binning_horizontal_size_args;
   std::vector<std::string> binning_horizontal_sizes;
-  pnh.param("BinningHorizontal", binning_horizontal_size_args, binning_horizontal_size_args);
+  pnh.param<std::string>("BinningHorizontal", binning_horizontal_size_args, binning_horizontal_size_args);
   parseStringArgs(binning_horizontal_size_args, binning_horizontal_sizes);
+  if( !binning_horizontal_size_args.empty() ){
+    parseStringArgs(binning_horizontal_size_args, binning_horizontal_sizes);
+  } else {
+    // need to handle the parameter as an integer
+    int binning_horizontal_size_int_arg;
+    pnh.param("BinningHorizontal", binning_horizontal_size_int_arg, 0);
+    binning_horizontal_sizes.push_back(std::to_string(binning_horizontal_size_int_arg));
+  }
 
   std::string binning_vertical_mode_args;
   std::vector<std::string> binning_vertical_modes;
@@ -590,9 +598,63 @@ void CameraAravisNodelet::onInit()
 
   std::string binning_vertical_size_args;
   std::vector<std::string> binning_vertical_sizes;
-  pnh.param("BinningVertical", binning_vertical_size_args, binning_vertical_size_args);
-  parseStringArgs(binning_vertical_size_args, binning_vertical_sizes);
+  pnh.param<std::string>("BinningVertical", binning_vertical_size_args, binning_vertical_size_args);
+  if( !binning_vertical_size_args.empty() ){
+    parseStringArgs(binning_vertical_size_args, binning_vertical_sizes);
+  } else {
+    // need to handle the parameter as an integer
+    int binning_vertical_size_int_arg;
+    pnh.param("BinningVertical", binning_vertical_size_int_arg, 0);
+    binning_vertical_sizes.push_back(std::to_string(binning_vertical_size_int_arg));
+  }
 
+  std::string offset_x_args;
+  std::vector<std::string> offsets_x;
+  pnh.param<std::string>("OffsetX", offset_x_args, "");
+  if( !offset_x_args.empty() ){
+    parseStringArgs(offset_x_args, offsets_x);
+  } else {
+    // need to handle the parameter as an integer
+    int offset_x_int_arg;
+    pnh.param("OffsetX", offset_x_int_arg, 0);
+    offsets_x.push_back(std::to_string(offset_x_int_arg));
+  }
+
+  std::string offset_y_args;
+  std::vector<std::string> offsets_y;
+  pnh.param<std::string>("OffsetY", offset_y_args, offset_y_args);
+  if( !offset_y_args.empty() ){
+    parseStringArgs(offset_y_args, offsets_y);
+  } else {
+    // need to handle the parameter as an integer
+    int offset_y_int_arg;
+    pnh.param("OffsetY", offset_y_int_arg, 0);
+    offsets_y.push_back(std::to_string(offset_y_int_arg));
+  }
+
+  std::string image_height_args;
+  std::vector<std::string> image_heights;
+  pnh.param<std::string>("Height", image_height_args, image_height_args);
+  if( !image_height_args.empty() ){
+    parseStringArgs(image_height_args, image_heights);
+  } else {
+    // need to handle the parameter as an integer
+    int image_height_int_arg;
+    pnh.param("Height", image_height_int_arg, 0);
+    image_heights.push_back(std::to_string(image_height_int_arg));
+  }
+
+  std::string image_width_args;
+  std::vector<std::string> image_widths;
+  pnh.param<std::string>("Width", image_width_args, image_width_args);
+  if( !image_width_args.empty() ){
+    parseStringArgs(image_width_args, image_widths);
+  } else {
+    // need to handle the parameter as an integer
+    int image_width_int_arg;
+    pnh.param("Width", image_width_int_arg, 0);
+    image_widths.push_back(std::to_string(image_width_int_arg));
+  }
 
   // check if every stream channel has been given a channel name
   if (stream_names_.size() < num_streams_) {
@@ -641,6 +703,32 @@ void CameraAravisNodelet::onInit()
       arv_device_set_integer_feature_value(p_device_, "BinningVertical", atoi(binning_vertical_sizes[i].c_str()));
     }
 
+    if (offsets_x.size() == 1) {
+      rois_[i]->x = atoi(offsets_x[0].c_str());
+    } else {
+      rois_[i]->x = atoi(offsets_x[i].c_str());
+    }
+
+    if (offsets_y.size() == 1) {
+      rois_[i]->y = atoi(offsets_y[0].c_str());
+    } else {
+      rois_[i]->y = atoi(offsets_y[i].c_str());
+    }
+
+    if (image_heights.size() == 1) {
+      rois_[i]->height = atoi(image_heights[0].c_str());
+      ROS_WARN("Image Height %s as integer %i", image_heights[0].c_str(), atoi(image_heights[0].c_str()));
+    } else {
+      rois_[i]->height = atoi(image_heights[i].c_str());
+      ROS_WARN("Image Height %s as integer %i", image_heights[i].c_str(), atoi(image_heights[i].c_str()) );
+    }
+
+    if (image_widths.size() == 1) {
+      rois_[i]->width = atoi(image_widths[0].c_str());
+    } else {
+      rois_[i]->width = atoi(image_widths[i].c_str());
+    }
+
     int32_t warn_img_width;
     int32_t warn_img_height;
     arv_camera_get_sensor_size(p_camera_, &warn_img_width, &warn_img_height);
@@ -677,8 +765,6 @@ void CameraAravisNodelet::onInit()
     // init default height/width to max 
     sensors_[i]->width = rois_[i]->width_max;
     sensors_[i]->height = rois_[i]->height_max;
-    rois_[i]->width = rois_[i]->width_max;
-    rois_[i]->height = rois_[i]->height_max;
 
   }
 
@@ -687,9 +773,9 @@ void CameraAravisNodelet::onInit()
     arv_camera_gv_select_stream_channel(p_camera_,i);
     arv_device_set_string_feature_value(p_device_, "SourceSelector", ("Source" + std::to_string(i)).c_str());
 
-    int32_t warn_img_width;
-    int32_t warn_img_height;
-    arv_camera_get_sensor_size(p_camera_, &warn_img_width, &warn_img_height);
+    int32_t warn_sensor_width;
+    int32_t warn_sensor_height;
+    arv_camera_get_sensor_size(p_camera_, &warn_sensor_width, &warn_sensor_height);
 
     int32_t warn_width_min;
     int32_t warn_width_max;
@@ -703,9 +789,9 @@ void CameraAravisNodelet::onInit()
 
     ROS_WARN("Currently on stream channel: %i", arv_camera_gv_get_current_stream_channel(p_camera_));
 
-    ROS_WARN("Stream %i (sensor size %i,%i) min (%i,%i) max (%i,%i) | Hoz: %s with %li | Vert: %s with %li ", i, 
-      warn_img_height,
-      warn_img_width,
+    ROS_WARN("Stream %i (sensor size %i,%i) min (%i,%i) max (%i,%i) | Hoz: %s with %li | Vert: %s with %li | ROI (x,y): (%i,%i)", i, 
+      warn_sensor_height,
+      warn_sensor_width,
 
       warn_width_min,
       warn_height_min,
@@ -716,16 +802,16 @@ void CameraAravisNodelet::onInit()
       arv_device_get_string_feature_value(p_device_, "BinningHorizontalMode"),
       arv_device_get_integer_feature_value(p_device_, "BinningHorizontal"),
       arv_device_get_string_feature_value(p_device_, "BinningVerticalMode"),
-      arv_device_get_integer_feature_value(p_device_, "BinningVertical")
+      arv_device_get_integer_feature_value(p_device_, "BinningVertical"),
+
+      rois_[i]->x,
+      rois_[i]->y
     );
   }
 
   // Get parameter bounds.
   arv_camera_get_exposure_time_bounds(p_camera_, &config_min_.ExposureTime, &config_max_.ExposureTime);
   arv_camera_get_gain_bounds(p_camera_, &config_min_.Gain, &config_max_.Gain);
-  for(int i = 0; i < num_streams_; i++) {
-    arv_camera_gv_select_stream_channel(p_camera_,i);
-  }
   
   arv_camera_get_frame_rate_bounds(p_camera_, &config_min_.AcquisitionFrameRate, &config_max_.AcquisitionFrameRate);
   if (implemented_features_["FocusPos"])
@@ -770,12 +856,40 @@ void CameraAravisNodelet::onInit()
     // possibly set or override from given parameter
     writeCameraFeaturesFromRosparam();
 
-    // Set up the height/width
-    if (i == 0) {
-      ROS_WARN("Stream %i : set (w,h) to (%i,%i)", i, rois_[i]->width, rois_[i]->height);
-      arv_device_set_integer_feature_value(p_device_, "Width", rois_[i]->width);
-      arv_device_set_integer_feature_value(p_device_, "Height", rois_[i]->height);
+    // Set up the height/width while considering the offset and the binning factor
+    int binning_x = (binning_horizontal_sizes.size() == 1) ? atoi(binning_horizontal_sizes[0].c_str()) : atoi(binning_horizontal_sizes[i].c_str()); 
+    int binning_y = (binning_vertical_sizes.size() == 1) ? atoi(binning_vertical_sizes[0].c_str()) : atoi(binning_vertical_sizes[i].c_str());
+
+
+    // Change the ROI dimensions and offset to reflect the actual image size after binning, 
+    // because most cameras use the image sensor after binning to determine the ROI position.
+    // While the ROS CameraInfo describes all ROI settings on the full resolution, we use 
+    // the post-binning values for the ROI object. 
+
+    ROS_WARN("Before Rescale: Stream %i : set (w,h) to (%i,%i) and offset (x,y) to (%i,%i)", i, 
+      rois_[i]->width, rois_[i]->height, rois_[i]->x, rois_[i]->y);
+
+    if (binning_x > 1) {
+      rois_[i]->x /= binning_x;
+      rois_[i]->width /= binning_x;
     }
+
+    if (binning_y > 1) {
+      rois_[i]->y /= binning_y;
+      rois_[i]->height /= binning_y;
+    }
+
+
+    
+
+    ROS_WARN("Stream %i : set (w,h) to (%i,%i) and offset (x,y) to (%i,%i)", i, 
+      rois_[i]->width, rois_[i]->height, rois_[i]->x, rois_[i]->y);
+
+
+    arv_device_set_integer_feature_value(p_device_, "Width", rois_[i]->width == 0 ? sensors_[i]->width : rois_[i]->width);
+    arv_device_set_integer_feature_value(p_device_, "Height", rois_[i]->height == 0 ? sensors_[i]->height : rois_[i]->height);
+    arv_device_set_integer_feature_value(p_device_, "OffsetX", rois_[i]->x);
+    arv_device_set_integer_feature_value(p_device_, "OffsetY", rois_[i]->y);
   }
 
   // Print width/height for debug purposes. I'm not sure if the feature is dependent for each stream
@@ -783,10 +897,12 @@ void CameraAravisNodelet::onInit()
   for(int i = 0; i < num_streams_; i++) {
     arv_camera_gv_select_stream_channel(p_camera_,i);
     arv_device_set_string_feature_value(p_device_, "SourceSelector", ("Source" + std::to_string(i)).c_str());
-    ROS_WARN("Stream %i (w,h) read is (%li,%li)", 
+    ROS_WARN("Stream %i : set (w,h) to (%li,%li) and offset (x,y) to (%li,%li)", 
       i, 
       arv_device_get_integer_feature_value(p_device_, "Width"), 
-      arv_device_get_integer_feature_value(p_device_, "Height"));
+      arv_device_get_integer_feature_value(p_device_, "Height"),
+      arv_device_get_integer_feature_value(p_device_, "OffsetX"), 
+      arv_device_get_integer_feature_value(p_device_, "OffsetY"));
   }
 
   // get current state of camera for config_
@@ -2109,6 +2225,7 @@ void CameraAravisNodelet::discoverFeatures()
 void CameraAravisNodelet::parseStringArgs(std::string in_arg_string, std::vector<std::string> &out_args) {
   size_t array_start = 0;
   size_t array_end = in_arg_string.length();
+  ROS_WARN("Called parseStringArgs (array_start %li, array_end %li)", array_start, array_end);
   if(array_start != std::string::npos && array_end != std::string::npos) {
         // parse the string into an array of parameters
         std::stringstream ss(in_arg_string.substr(array_start, array_end - array_start));
@@ -2121,6 +2238,7 @@ void CameraAravisNodelet::parseStringArgs(std::string in_arg_string, std::vector
         }
   } else {
     // add just the one argument onto the vector
+    ROS_WARN("Found just one element in the strings_args");
     out_args.push_back(in_arg_string);
   }
 }
